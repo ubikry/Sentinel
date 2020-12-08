@@ -15,22 +15,22 @@
  */
 package com.alibaba.csp.sentinel.dashboard.controller;
 
-import java.util.Date;
-import java.util.List;
-
 import com.alibaba.csp.sentinel.dashboard.auth.AuthAction;
 import com.alibaba.csp.sentinel.dashboard.auth.AuthService.PrivilegeType;
-import com.alibaba.csp.sentinel.dashboard.repository.rule.RuleRepository;
-import com.alibaba.csp.sentinel.util.StringUtil;
-
+import com.alibaba.csp.sentinel.dashboard.client.SentinelApiClient;
 import com.alibaba.csp.sentinel.dashboard.datasource.entity.rule.SystemRuleEntity;
 import com.alibaba.csp.sentinel.dashboard.discovery.MachineInfo;
-import com.alibaba.csp.sentinel.dashboard.client.SentinelApiClient;
 import com.alibaba.csp.sentinel.dashboard.domain.Result;
-
+import com.alibaba.csp.sentinel.dashboard.repository.rule.RuleRepository;
+import com.alibaba.csp.sentinel.dashboard.rule.DynamicRuleProvider;
+import com.alibaba.csp.sentinel.dashboard.rule.DynamicRulePublisher;
+import com.alibaba.csp.sentinel.util.StringUtil;
+import java.util.Date;
+import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -48,6 +48,13 @@ public class SystemController {
     private RuleRepository<SystemRuleEntity, Long> repository;
     @Autowired
     private SentinelApiClient sentinelApiClient;
+
+    @Autowired
+    @Qualifier("systemRuleNacosProvider")
+    private DynamicRuleProvider<List<SystemRuleEntity>> ruleProvider;
+    @Autowired
+    @Qualifier("systemRuleNacosPublisher")
+    private DynamicRulePublisher<List<SystemRuleEntity>> rulePublisher;
 
     private <R> Result<R> checkBasicParams(String app, String ip, Integer port) {
         if (StringUtil.isEmpty(app)) {
@@ -69,6 +76,10 @@ public class SystemController {
     @AuthAction(PrivilegeType.READ_RULE)
     public Result<List<SystemRuleEntity>> apiQueryMachineRules(String app, String ip,
                                                                Integer port) {
+        // 为了去除差异
+        ip = "127.0.0.1";
+        port = 8719;
+
         Result<List<SystemRuleEntity>> checkResult = checkBasicParams(app, ip, port);
         if (checkResult != null) {
             return checkResult;
@@ -76,6 +87,10 @@ public class SystemController {
         try {
             List<SystemRuleEntity> rules = sentinelApiClient.fetchSystemRuleOfMachine(app, ip, port);
             rules = repository.saveAll(rules);
+
+            rules = ruleProvider.getRules(app);
+            repository.saveAll(rules);
+
             return Result.ofSuccess(rules);
         } catch (Throwable throwable) {
             logger.error("Query machine system rules error", throwable);
@@ -243,8 +258,16 @@ public class SystemController {
         return Result.ofSuccess(id);
     }
 
+
     private boolean publishRules(String app, String ip, Integer port) {
         List<SystemRuleEntity> rules = repository.findAllByMachine(MachineInfo.of(app, ip, port));
+        List<SystemRuleEntity> rules1 = repository.findAllByApp(app);
+        try {
+            rulePublisher.publish(app,rules1);
+        } catch (Exception e) {
+            e.printStackTrace();
+            logger.error("持久化系统规则失败");
+        }
         return sentinelApiClient.setSystemRuleOfMachine(app, ip, port, rules);
     }
 }
