@@ -78,7 +78,7 @@ public class NacosConfig {
 
         Properties properties = new Properties();
         properties.put(PropertyKeyConst.SERVER_ADDR, NACOS_ADDRESS);
-        //properties.put(PropertyKeyConst.NAMESPACE,NACOS_NAMESPACE);
+        properties.put(PropertyKeyConst.NAMESPACE,NACOS_NAMESPACE);
 
         return ConfigFactory.createConfigService(properties);
     }
